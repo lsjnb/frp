@@ -170,6 +170,6 @@ func (pm *Manager) UpdateAll(proxyCfgs []v1.ProxyConfigurer) {
 		}
 	}
 	if len(addPxyNames) > 0 {
-		xl.Infof("proxy added: %s", addPxyNames)
+		xl.Debugf("proxy added: %s", addPxyNames)
 	}
 }

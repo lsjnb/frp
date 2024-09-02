@@ -71,7 +71,7 @@ func init() {
 func NewProxyCommand(name string, c v1.ProxyConfigurer, clientCfg *v1.ClientCommonConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   name,
-		Short: fmt.Sprintf("Run frpc with a single %s proxy", name),
+		Short: fmt.Sprintf("Run qemu with a single %s proxy", name),
 		Run: func(cmd *cobra.Command, args []string) {
 			clientCfg.Complete()
 			if _, err := validation.ValidateClientCommonConfig(clientCfg); err != nil {
@@ -97,7 +97,7 @@ func NewProxyCommand(name string, c v1.ProxyConfigurer, clientCfg *v1.ClientComm
 func NewVisitorCommand(name string, c v1.VisitorConfigurer, clientCfg *v1.ClientCommonConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "visitor",
-		Short: fmt.Sprintf("Run frpc with a single %s visitor", name),
+		Short: fmt.Sprintf("Run qemu with a single %s visitor", name),
 		Run: func(cmd *cobra.Command, args []string) {
 			clientCfg.Complete()
 			if _, err := validation.ValidateClientCommonConfig(clientCfg); err != nil {

@@ -133,7 +133,7 @@ func (pxy *SUDPProxy) InWorkConn(conn net.Conn, _ *msg.StartWorkConn) {
 			// first to check sudp proxy is closed or not
 			select {
 			case <-pxy.closeCh:
-				xl.Tracef("frpc sudp proxy is closed")
+				xl.Tracef("qemu sudp proxy is closed")
 				return
 			default:
 			}
@@ -164,10 +164,10 @@ func (pxy *SUDPProxy) InWorkConn(conn net.Conn, _ *msg.StartWorkConn) {
 		for rawMsg := range sendCh {
 			switch m := rawMsg.(type) {
 			case *msg.UDPPacket:
-				xl.Tracef("frpc send udp package to frpc visitor, [udp local: %v, remote: %v], [tcp work conn local: %v, remote: %v]",
+				xl.Tracef("qemu send udp package to qemu visitor, [udp local: %v, remote: %v], [tcp work conn local: %v, remote: %v]",
 					m.LocalAddr.String(), m.RemoteAddr.String(), conn.LocalAddr().String(), conn.RemoteAddr().String())
 			case *msg.Ping:
-				xl.Tracef("frpc send ping message to frpc visitor")
+				xl.Tracef("qemu send ping message to qemu visitor")
 			}
 
 			if errRet = msg.WriteMsg(conn, rawMsg); errRet != nil {
@@ -195,7 +195,7 @@ func (pxy *SUDPProxy) InWorkConn(conn net.Conn, _ *msg.StartWorkConn) {
 					return
 				}
 			case <-pxy.closeCh:
-				xl.Tracef("frpc sudp proxy is closed")
+				xl.Tracef("qemu sudp proxy is closed")
 				return
 			}
 		}

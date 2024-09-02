@@ -163,9 +163,9 @@ func (ctl *Control) handleNewProxyResp(m msg.Message) {
 	// Start a new proxy handler if no error got
 	err := ctl.pm.StartProxy(inMsg.ProxyName, inMsg.RemoteAddr, inMsg.Error)
 	if err != nil {
-		xl.Warnf("[%s] start error: %v", inMsg.ProxyName, err)
+		xl.Debugf("[%s] start error: %v", inMsg.ProxyName, err)
 	} else {
-		xl.Infof("[%s] start proxy success", inMsg.ProxyName)
+		xl.Debugf("[%s] start proxy success", inMsg.ProxyName)
 	}
 }
 

@@ -37,9 +37,9 @@ func init() {
 		description string
 		handler     func(*v1.ClientCommonConfig) error
 	}{
-		{"reload", "Hot-Reload frpc configuration", ReloadHandler},
+		{"reload", "Hot-Reload qemu configuration", ReloadHandler},
 		{"status", "Overview of all proxies status", StatusHandler},
-		{"stop", "Stop the running frpc", StopHandler},
+		{"stop", "Stop the running qemu", StopHandler},
 	}
 
 	for _, cmdConfig := range commands {

@@ -284,7 +284,7 @@ func (svr *Service) login() (conn net.Conn, connector Connector, err error) {
 	svr.runID = loginRespMsg.RunID
 	xl.AddPrefix(xlog.LogPrefix{Name: "runID", Value: svr.runID})
 
-	xl.Infof("login to server success, get run id [%s]", loginRespMsg.RunID)
+	xl.Debugf("login to server success, get run id [%s]", loginRespMsg.RunID)
 	return
 }
 
@@ -292,10 +292,10 @@ func (svr *Service) loopLoginUntilSuccess(maxInterval time.Duration, firstLoginE
 	xl := xlog.FromContextSafe(svr.ctx)
 
 	loginFunc := func() (bool, error) {
-		xl.Infof("try to connect to server...")
+		xl.Debugf("try to connect to server...")
 		conn, connector, err := svr.login()
 		if err != nil {
-			xl.Warnf("connect to server error: %v", err)
+			xl.Debugf("connect to server error: %v", err)
 			if firstLoginExit {
 				svr.cancel(cancelErr{Err: err})
 			}
