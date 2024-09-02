@@ -49,14 +49,18 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgDir, "config_dir", "", "", "config directory, run one qemu service for each file in config directory")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "version of qemu")
 	rootCmd.PersistentFlags().BoolVarP(&strictConfigMode, "strict_config", "", true, "strict config parsing mode, unknown fields will cause an errors")
-	rootCmd.PersistentFlags().MarkHidden("config")
-	_ = rootCmd.PersistentFlags().MarkHidden("config")
-	rootCmd.PersistentFlags().MarkHidden("config_dir")
-	_ = rootCmd.PersistentFlags().MarkHidden("config_dir")
-	rootCmd.PersistentFlags().MarkHidden("version")
-	_ = rootCmd.PersistentFlags().MarkHidden("version")
-	rootCmd.PersistentFlags().MarkHidden("strict_config")
-	_ = rootCmd.PersistentFlags().MarkHidden("strict_config")
+	if err := rootCmd.PersistentFlags().MarkHidden("config"); err != nil {
+		fmt.Printf("Error hiding flag 'config': %v", err)
+	}
+	if err := rootCmd.PersistentFlags().MarkHidden("config_dir"); err != nil {
+		fmt.Printf("Error hiding flag 'config_dir': %v", err)
+	}
+	if err := rootCmd.PersistentFlags().MarkHidden("version"); err != nil {
+		fmt.Printf("Error hiding flag 'version': %v", err)
+	}
+	if err := rootCmd.PersistentFlags().MarkHidden("strict_config"); err != nil {
+		fmt.Printf("Error hiding flag 'strict_config': %v", err)
+	}
 	rootCmd.SetHelpFunc(func(*cobra.Command, []string) {})
 	rootCmd.SetUsageFunc(func(*cobra.Command) error { return nil })
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
