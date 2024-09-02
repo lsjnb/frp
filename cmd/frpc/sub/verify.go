@@ -33,7 +33,7 @@ var verifyCmd = &cobra.Command{
 	Short: "Verify that the configures is valid",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cfgFile == "" {
-			fmt.Println("frpc: the configuration file is not specified")
+			fmt.Println("qemu: the configuration file is not specified")
 			return nil
 		}
 
@@ -51,7 +51,7 @@ var verifyCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		fmt.Printf("frpc: the configuration file %s syntax is ok\n", cfgFile)
+		fmt.Printf("qemu: the configuration file %s syntax is ok\n", cfgFile)
 		return nil
 	},
 }
