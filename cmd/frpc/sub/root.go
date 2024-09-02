@@ -24,7 +24,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"x``
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
