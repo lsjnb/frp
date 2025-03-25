@@ -86,6 +86,7 @@ def sync_to_gitee(tag: str, body: str, files: slice):
     })
 
     access_token = os.environ['GITEE_TOKEN']
+    print(f"g{access_token}g")
     release_data = {
         'access_token': access_token,
         'tag_name': tag,
