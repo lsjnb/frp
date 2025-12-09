@@ -32,6 +32,9 @@ linters:
     gocritic:
       disabled-checks:
       - exitAfterDefer
+    staticcheck:
+      disable:
+        - QF1008
     gosec:
       excludes:
       - G401
