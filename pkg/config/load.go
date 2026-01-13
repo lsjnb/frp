@@ -306,6 +306,66 @@ func LoadClientConfig(path string, strict bool) (
 	return cliCfg, proxyCfgs, visitorCfgs, isLegacyFormat, nil
 }
 
+// LoadClientConfigFromBytes loads client config from bytes content (supports legacy ini format)
+func LoadClientConfigFromBytes(content []byte) (
+	*v1.ClientCommonConfig,
+	[]v1.ProxyConfigurer,
+	[]v1.VisitorConfigurer,
+	error,
+) {
+	var (
+		cliCfg      *v1.ClientCommonConfig
+		proxyCfgs   = make([]v1.ProxyConfigurer, 0)
+		visitorCfgs = make([]v1.VisitorConfigurer, 0)
+	)
+
+	if DetectLegacyINIFormat(content) {
+		legacyCommon, err := legacy.UnmarshalClientConfFromIni(content)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if err = legacyCommon.Validate(); err != nil {
+			return nil, nil, nil, err
+		}
+		legacyProxyCfgs, legacyVisitorCfgs, err := legacy.LoadAllProxyConfsFromIni(legacyCommon.User, content, legacyCommon.Start)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		cliCfg = legacy.Convert_ClientCommonConf_To_v1(&legacyCommon)
+		for _, c := range legacyProxyCfgs {
+			proxyCfgs = append(proxyCfgs, legacy.Convert_ProxyConf_To_v1(c))
+		}
+		for _, c := range legacyVisitorCfgs {
+			visitorCfgs = append(visitorCfgs, legacy.Convert_VisitorConf_To_v1(c))
+		}
+	} else {
+		allCfg := v1.ClientConfig{}
+		if err := LoadConfigure(content, &allCfg, true); err != nil {
+			return nil, nil, nil, err
+		}
+		cliCfg = &allCfg.ClientCommonConfig
+		for _, c := range allCfg.Proxies {
+			proxyCfgs = append(proxyCfgs, c.ProxyConfigurer)
+		}
+		for _, c := range allCfg.Visitors {
+			visitorCfgs = append(visitorCfgs, c.VisitorConfigurer)
+		}
+	}
+
+	if cliCfg != nil {
+		if err := cliCfg.Complete(); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	for _, c := range proxyCfgs {
+		c.Complete(cliCfg.User)
+	}
+	for _, c := range visitorCfgs {
+		c.Complete(cliCfg)
+	}
+	return cliCfg, proxyCfgs, visitorCfgs, nil
+}
+
 func LoadAdditionalClientConfigs(paths []string, isLegacyFormat bool, strict bool) ([]v1.ProxyConfigurer, []v1.VisitorConfigurer, error) {
 	proxyCfgs := make([]v1.ProxyConfigurer, 0)
 	visitorCfgs := make([]v1.VisitorConfigurer, 0)

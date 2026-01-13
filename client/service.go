@@ -79,14 +79,14 @@ type ServiceOptions struct {
 	// The Connector shields the underlying connection details, whether it is through TCP or QUIC connection,
 	// and regardless of whether multiplexing is used.
 	//
-	// If it is not set, the default frpc connector will be used.
+	// If it is not set, the default qemu connector will be used.
 	// By using a custom Connector, it can be used to implement a VirtualClient, which connects to frps
 	// through a pipe instead of a real physical connection.
 	ConnectorCreator func(context.Context, *v1.ClientCommonConfig) Connector
 
 	// HandleWorkConnCb is a callback function that is called when a new work connection is created.
 	//
-	// If it is not set, the default frpc implementation will be used.
+	// If it is not set, the default qemu implementation will be used.
 	HandleWorkConnCb func(*v1.ProxyBaseConfig, net.Conn, *msg.StartWorkConn) bool
 }
 
