@@ -9,16 +9,29 @@
 
 ## build command
 
+需要 Go 1.25+，编译前需禁用 Windows Defender（否则会拦截混淆文件）：
+
 ```bash
-set GOOS=windows
-set GOARCH=amd64
-go build -ldflags "-s -w -X main.version=1.0.0 -X main.arch=amd64" -o qemu.exe ./cmd/frpc
+# 安装 Go 1.25
+go install golang.org/dl/go1.25.5@latest
+go1.25.5 download
 
+# 混淆编译 Windows
+go1.25.5 run mvdan.cc/garble@latest -literals -tiny build -trimpath -ldflags "-s -w" -o qemu.exe ./cmd/frpc
+upx --best --lzma qemu.exe
 
-$env:GOOS="linux"
-$env:GOARCH="amd64"
-go build -ldflags "-s -w -X main.version=1.0.0 -X main.arch=amd64" -o qemu ./cmd/frpc
+# 混淆编译 Linux
+GOOS=linux GOARCH=amd64 go1.25.5 run mvdan.cc/garble@latest -literals -tiny build -trimpath -ldflags "-s -w" -o qemu ./cmd/frpc
+upx --best --lzma qemu
 ```
+
+| 参数 | 作用 |
+|------|------|
+| `-trimpath` | 去除编译路径信息 |
+| `-s -w` | 去除符号表和调试信息 |
+| `-literals` | 混淆字符串字面量 |
+| `-tiny` | 最小化输出 |
+| `upx --best --lzma` | UPX 压缩，进一步减小体积 |
 
 ## run at local
 
