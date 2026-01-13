@@ -76,7 +76,7 @@ func (c *messageConnector) Close() error {
 	return c.connector.Close()
 }
 
-// defaultConnectorImpl is the default implementation of Connector for normal frpc.
+// defaultConnectorImpl is the default implementation of Connector for normal qemu.
 type defaultConnectorImpl struct {
 	ctx context.Context
 	cfg *v1.ClientCommonConfig

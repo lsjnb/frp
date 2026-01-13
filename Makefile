@@ -5,11 +5,11 @@ NOWEB_TAG = $(shell [ ! -d web/frps/dist ] || [ ! -d web/frpc/dist ] && echo ',n
 FRP_COMPAT_BASELINE_COUNT ?= 8
 FRP_COMPAT_FLOOR_VERSION ?= 0.61.0
 
-.PHONY: web web-ci frps-web frpc-web frps frpc e2e-compatibility-smoke e2e-compatibility e2e-compatibility-floor
+.PHONY: web web-ci frps-web frpc-web frps qemu e2e-compatibility-smoke e2e-compatibility e2e-compatibility-floor
 
 all: env fmt web build
 
-build: frps frpc
+build: frps qemu
 
 env:
 	@go version
@@ -40,8 +40,8 @@ vet:
 frps:
 	env CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -tags "frps$(NOWEB_TAG)" -o bin/frps ./cmd/frps
 
-frpc:
-	env CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -tags "frpc$(NOWEB_TAG)" -o bin/frpc ./cmd/frpc
+qemu:
+	env CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -tags "frpc$(NOWEB_TAG)" -o bin/qemu ./cmd/frpc
 
 test: gotest
 
@@ -67,11 +67,11 @@ e2e-compatibility: build
 e2e-compatibility-floor: build
 	FRP_COMPAT_BASELINE_VERSIONS="$(FRP_COMPAT_FLOOR_VERSION)" ./hack/run-e2e-compatibility.sh
 
-e2e-compatibility-last-frpc:
+e2e-compatibility-last-qemu:
 	if [ ! -d "./lastversion" ]; then \
 		TARGET_DIRNAME=lastversion ./hack/download.sh; \
 	fi
-	FRPC_PATH="`pwd`/lastversion/frpc" ./hack/run-e2e.sh
+	FRPC_PATH="`pwd`/lastversion/qemu" ./hack/run-e2e.sh
 	rm -r ./lastversion
 
 e2e-compatibility-last-frps:
@@ -84,7 +84,7 @@ e2e-compatibility-last-frps:
 alltest: vet gotest e2e
 	
 clean:
-	rm -f ./bin/frpc
+	rm -f ./bin/qemu
 	rm -f ./bin/frps
 	rm -rf ./lastversion
 	rm -rf ./.cache
