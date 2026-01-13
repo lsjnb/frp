@@ -39,6 +39,7 @@ import (
 	"github.com/fatedier/frp/pkg/util/wait"
 	"github.com/fatedier/frp/pkg/util/xlog"
 	"github.com/fatedier/frp/pkg/vnet"
+	goliblog "github.com/fatedier/golib/log"
 )
 
 func init() {
@@ -71,6 +72,9 @@ type ServiceOptions struct {
 	// If it is empty, it means that the configuration file is not used for initialization.
 	// It may be initialized using command line parameters or called directly.
 	ConfigFilePath string
+
+	// Logger is the logger instance for this service. If nil, uses the global logger.
+	Logger *goliblog.Logger
 
 	// ClientSpec is the client specification that control the client behavior.
 	ClientSpec *msg.ClientSpec
@@ -125,6 +129,9 @@ type Service struct {
 	visitorCfgs []v1.VisitorConfigurer
 	clientSpec  *msg.ClientSpec
 
+	// logger instance for this service
+	logger *goliblog.Logger
+
 	unsafeFeatures *security.UnsafeFeatures
 
 	// The configuration file used to initialize this client, or an empty
@@ -172,6 +179,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		clientSpec:       options.ClientSpec,
 		connectorCreator: options.ConnectorCreator,
 		handleWorkConnCb: options.HandleWorkConnCb,
+		logger:           options.Logger,
 	}
 	if webServer != nil {
 		webServer.RouteRegister(s.registerRouteHandlers)
@@ -184,7 +192,11 @@ func NewService(options ServiceOptions) (*Service, error) {
 
 func (svr *Service) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancelCause(ctx)
-	svr.ctx = xlog.NewContext(ctx, xlog.FromContextSafe(ctx))
+	xl := xlog.FromContextSafe(ctx)
+	if svr.logger != nil {
+		xl = xlog.NewWithLogger(svr.logger)
+	}
+	svr.ctx = xlog.NewContext(ctx, xl)
 	svr.cancel = cancel
 
 	// set custom DNSServer

