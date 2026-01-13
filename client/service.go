@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/fatedier/golib/crypto"
+	goliblog "github.com/fatedier/golib/log"
 	"github.com/samber/lo"
 
 	"github.com/fatedier/frp/client/proxy"
@@ -39,7 +40,6 @@ import (
 	"github.com/fatedier/frp/pkg/util/wait"
 	"github.com/fatedier/frp/pkg/util/xlog"
 	"github.com/fatedier/frp/pkg/vnet"
-	goliblog "github.com/fatedier/golib/log"
 )
 
 func init() {
