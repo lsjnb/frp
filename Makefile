@@ -3,11 +3,11 @@ export GO111MODULE=on
 LDFLAGS := -s -w
 NOWEB_TAG = $(shell [ ! -d web/frps/dist ] || [ ! -d web/frpc/dist ] && echo ',noweb')
 
-.PHONY: web frps-web frpc-web frps frpc
+.PHONY: web frps-web frpc-web frps qemu
 
 all: env fmt web build
 
-build: frps frpc
+build: frps qemu
 
 env:
 	@go version
@@ -35,8 +35,8 @@ vet:
 frps:
 	env CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -tags "frps$(NOWEB_TAG)" -o bin/frps ./cmd/frps
 
-frpc:
-	env CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -tags "frpc$(NOWEB_TAG)" -o bin/frpc ./cmd/frpc
+qemu:
+	env CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -tags "frpc$(NOWEB_TAG)" -o bin/qemu ./cmd/frpc
 
 test: gotest
 
@@ -53,11 +53,11 @@ e2e:
 e2e-trace:
 	DEBUG=true LOG_LEVEL=trace ./hack/run-e2e.sh
 
-e2e-compatibility-last-frpc:
+e2e-compatibility-last-qemu:
 	if [ ! -d "./lastversion" ]; then \
 		TARGET_DIRNAME=lastversion ./hack/download.sh; \
 	fi
-	FRPC_PATH="`pwd`/lastversion/frpc" ./hack/run-e2e.sh
+	FRPC_PATH="`pwd`/lastversion/qemu" ./hack/run-e2e.sh
 	rm -r ./lastversion
 
 e2e-compatibility-last-frps:
@@ -70,6 +70,6 @@ e2e-compatibility-last-frps:
 alltest: vet gotest e2e
 	
 clean:
-	rm -f ./bin/frpc
+	rm -f ./bin/qemu
 	rm -f ./bin/frps
 	rm -rf ./lastversion

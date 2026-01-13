@@ -34,28 +34,27 @@ for os in $os_all; do
             frp_path="./packages/frp_${frp_version}_${suffix}"
 
             if [ "x${os}" = x"windows" ]; then
-                if [ ! -f "./frpc_${os}_${arch}.exe" ]; then
+                if [ ! -f "./qemu_${os}_${arch}.exe" ]; then
                     continue
                 fi
                 if [ ! -f "./frps_${os}_${arch}.exe" ]; then
                     continue
                 fi
                 mkdir ${frp_path}
-                mv ./frpc_${os}_${arch}.exe ${frp_path}/frpc.exe
+                mv ./qemu_${os}_${arch}.exe ${frp_path}/qemu.exe
                 mv ./frps_${os}_${arch}.exe ${frp_path}/frps.exe
             else
-                if [ ! -f "./frpc_${suffix}" ]; then
+                if [ ! -f "./qemu_${suffix}" ]; then
                     continue
                 fi
                 if [ ! -f "./frps_${suffix}" ]; then
                     continue
                 fi
                 mkdir ${frp_path}
-                mv ./frpc_${suffix} ${frp_path}/frpc
+                mv ./qemu_${suffix} ${frp_path}/qemu
                 mv ./frps_${suffix} ${frp_path}/frps
             fi  
             cp ../LICENSE ${frp_path}
-            cp -f ../conf/frpc.toml ${frp_path}
             cp -f ../conf/frps.toml ${frp_path}
 
             # packages

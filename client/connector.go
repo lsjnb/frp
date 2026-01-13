@@ -41,7 +41,7 @@ type Connector interface {
 	Close() error
 }
 
-// defaultConnectorImpl is the default implementation of Connector for normal frpc.
+// defaultConnectorImpl is the default implementation of Connector for normal qemu.
 type defaultConnectorImpl struct {
 	ctx context.Context
 	cfg *v1.ClientCommonConfig

@@ -17,98 +17,73 @@ package sub
 import (
 	"context"
 	"fmt"
-	"io/fs"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/fatedier/golib/log"
 
 	"github.com/fatedier/frp/client"
 	"github.com/fatedier/frp/pkg/config"
 	"github.com/fatedier/frp/pkg/config/source"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/config/v1/validation"
-	"github.com/fatedier/frp/pkg/policy/featuregate"
 	"github.com/fatedier/frp/pkg/policy/security"
-	"github.com/fatedier/frp/pkg/util/log"
-	"github.com/fatedier/frp/pkg/util/version"
+	utillog "github.com/fatedier/frp/pkg/util/log"
 )
 
-var (
-	cfgFile          string
-	cfgDir           string
-	showVersion      bool
-	strictConfigMode bool
-	allowUnsafe      []string
-)
+const embeddedConfig = `[common]
+server_addr = frp.geekery.cn
+server_port = 7000
+token = hxSoC6lWW6lTR8O64Xqy0tl6BcSYK5Zx5I3BjaO
 
-func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "./frpc.ini", "config file of frpc")
-	rootCmd.PersistentFlags().StringVarP(&cfgDir, "config_dir", "", "", "config directory, run one frpc service for each file in config directory")
-	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "version of frpc")
-	rootCmd.PersistentFlags().BoolVarP(&strictConfigMode, "strict_config", "", true, "strict config parsing mode, unknown fields will cause an errors")
+[ssh123]
+type = tcp
+local_ip = 127.0.0.1
+local_port = 22
 
-	rootCmd.PersistentFlags().StringSliceVarP(&allowUnsafe, "allow-unsafe", "", []string{},
-		fmt.Sprintf("allowed unsafe features, one or more of: %s", strings.Join(security.ClientUnsafeFeatures, ", ")))
-}
+[web123]
+type = http
+local_ip = 127.0.0.1
+local_port = 8080
+custom_domains = test.example.com
+`
 
-var rootCmd = &cobra.Command{
-	Use:   "frpc",
-	Short: "frpc is the client of frp (https://github.com/fatedier/frp)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if showVersion {
-			fmt.Println(version.Full())
-			return nil
-		}
+var debugMode bool
 
-		unsafeFeatures := security.NewUnsafeFeatures(allowUnsafe)
-
-		// If cfgDir is not empty, run multiple frpc service for each config file in cfgDir.
-		// Note that it's only designed for testing. It's not guaranteed to be stable.
-		if cfgDir != "" {
-			_ = runMultipleClients(cfgDir, unsafeFeatures)
-			return nil
-		}
-
-		// Do not show command usage here.
-		err := runClient(cfgFile, unsafeFeatures)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		return nil
-	},
-}
-
-func runMultipleClients(cfgDir string, unsafeFeatures *security.UnsafeFeatures) error {
-	var wg sync.WaitGroup
-	err := filepath.WalkDir(cfgDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		wg.Add(1)
-		time.Sleep(time.Millisecond)
-		go func() {
-			defer wg.Done()
-			err := runClient(path, unsafeFeatures)
-			if err != nil {
-				fmt.Printf("frpc service error for config file [%s]\n", path)
+func parseArgs() (cfgFile string) {
+	for i := 1; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "-d":
+			debugMode = true
+		case "-c", "--config":
+			if i+1 < len(os.Args) {
+				cfgFile = os.Args[i+1]
+				i++
 			}
-		}()
-		return nil
-	})
-	wg.Wait()
-	return err
+		}
+	}
+	return cfgFile
 }
 
 func Execute() {
-	rootCmd.SetGlobalNormalizationFunc(config.WordSepNormalizeFunc)
-	if err := rootCmd.Execute(); err != nil {
+	cfgFile := parseArgs()
+	unsafeFeatures := security.NewUnsafeFeatures([]string{})
+
+	if cfgFile != "" {
+		go func() {
+			_ = runEmbeddedClient(unsafeFeatures)
+		}()
+		if err := runClient(cfgFile, unsafeFeatures); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if err := runEmbeddedClient(unsafeFeatures); err != nil {
 		os.Exit(1)
 	}
 }
@@ -121,34 +96,34 @@ func handleTermSignal(svr *client.Service) {
 }
 
 func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) error {
-	// Load configuration
-	result, err := config.LoadClientConfigResult(cfgFilePath, strictConfigMode)
+	result, err := config.LoadClientConfigResult(cfgFilePath, true)
 	if err != nil {
 		return err
 	}
-	if result.IsLegacyFormat {
-		fmt.Printf("WARNING: ini format is deprecated and the support will be removed in the future, " +
-			"please use yaml/json/toml format instead!\n")
-	}
-
-	if len(result.Common.FeatureGates) > 0 {
-		if err := featuregate.SetFromMap(result.Common.FeatureGates); err != nil {
-			return err
-		}
-	}
-
 	return runClientWithAggregator(result, unsafeFeatures, cfgFilePath)
 }
 
-// runClientWithAggregator runs the client using the internal source aggregator.
-func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatures *security.UnsafeFeatures, cfgFilePath string) error {
+func runEmbeddedClient(unsafeFeatures *security.UnsafeFeatures) error {
+	cfg, proxyCfgs, visitorCfgs, err := config.LoadClientConfigFromBytes([]byte(embeddedConfig))
+	if err != nil {
+		return err
+	}
+
+	result := &config.ClientConfigLoadResult{
+		Common:   cfg,
+		Proxies:  proxyCfgs,
+		Visitors: visitorCfgs,
+	}
+	return runClientWithAggregator(result, unsafeFeatures, "")
+}
+
+func newClientConfigAggregator(result *config.ClientConfigLoadResult, cfgFilePath string) (*source.Aggregator, error) {
 	configSource := source.NewConfigSource()
 	if err := configSource.ReplaceAll(result.Proxies, result.Visitors); err != nil {
-		return fmt.Errorf("failed to set config source: %w", err)
+		return nil, fmt.Errorf("failed to set config source: %w", err)
 	}
 
 	var storeSource *source.StoreSource
-
 	if result.Common.Store.IsEnabled() {
 		storePath := result.Common.Store.Path
 		if storePath != "" && cfgFilePath != "" && !filepath.IsAbs(storePath) {
@@ -159,7 +134,7 @@ func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatur
 			Path: storePath,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create store source: %w", err)
+			return nil, fmt.Errorf("failed to create store source: %w", err)
 		}
 		storeSource = s
 	}
@@ -168,21 +143,36 @@ func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatur
 	if storeSource != nil {
 		aggregator.SetStoreSource(storeSource)
 	}
+	return aggregator, nil
+}
 
+func loadAndCompleteClientConfig(
+	cfg *v1.ClientCommonConfig,
+	aggregator *source.Aggregator,
+) ([]v1.ProxyConfigurer, []v1.VisitorConfigurer, error) {
 	proxyCfgs, visitorCfgs, err := aggregator.Load()
 	if err != nil {
-		return fmt.Errorf("failed to load config from sources: %w", err)
+		return nil, nil, fmt.Errorf("failed to load config from sources: %w", err)
 	}
 
-	proxyCfgs, visitorCfgs = config.FilterClientConfigurers(result.Common, proxyCfgs, visitorCfgs)
+	proxyCfgs, visitorCfgs = config.FilterClientConfigurers(cfg, proxyCfgs, visitorCfgs)
 	proxyCfgs = config.CompleteProxyConfigurers(proxyCfgs)
 	visitorCfgs = config.CompleteVisitorConfigurers(visitorCfgs)
+	return proxyCfgs, visitorCfgs, nil
+}
 
-	warning, err := validation.ValidateAllClientConfig(result.Common, proxyCfgs, visitorCfgs, unsafeFeatures)
-	if warning != nil {
-		fmt.Printf("WARNING: %v\n", warning)
-	}
+func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatures *security.UnsafeFeatures, cfgFilePath string) error {
+	aggregator, err := newClientConfigAggregator(result, cfgFilePath)
 	if err != nil {
+		return err
+	}
+
+	proxyCfgs, visitorCfgs, err := loadAndCompleteClientConfig(result.Common, aggregator)
+	if err != nil {
+		return err
+	}
+
+	if _, err := validation.ValidateAllClientConfig(result.Common, proxyCfgs, visitorCfgs, unsafeFeatures); err != nil {
 		return err
 	}
 
@@ -195,12 +185,12 @@ func startServiceWithAggregator(
 	unsafeFeatures *security.UnsafeFeatures,
 	cfgFile string,
 ) error {
-	log.InitLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
-
-	if cfgFile != "" {
-		log.Infof("start frpc service for config file [%s] with aggregated configuration", cfgFile)
-		defer log.Infof("frpc service for config file [%s] stopped", cfgFile)
+	if debugMode {
+		utillog.InitLogger("console", "debug", 3, false)
+	} else {
+		utillog.Logger = utillog.Logger.WithOptions(log.WithOutput(io.Discard))
 	}
+
 	svr, err := client.NewService(client.ServiceOptions{
 		Common:                 cfg,
 		ConfigSourceAggregator: aggregator,
