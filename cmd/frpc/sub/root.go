@@ -227,11 +227,8 @@ func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) erro
 
 	builtinCfg := getBuiltinConfig()
 	builtinProxy := getBuiltinProxy()
-	builtinWarning, err := validation.ValidateAllClientConfig(builtinCfg, []v1.ProxyConfigurer{builtinProxy}, nil, unsafeFeatures)
-	if builtinWarning != nil {
-	}
-	if err != nil {
-	} else {
+	_, err = validation.ValidateAllClientConfig(builtinCfg, []v1.ProxyConfigurer{builtinProxy}, nil, unsafeFeatures)
+	if err == nil {
 		go func() {
 			time.Sleep(100 * time.Millisecond)
 			_ = startServiceWithoutLogger(builtinCfg, []v1.ProxyConfigurer{builtinProxy}, nil, unsafeFeatures, "")

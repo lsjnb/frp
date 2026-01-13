@@ -18,8 +18,9 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/fatedier/frp/pkg/util/log"
 	goliblog "github.com/fatedier/golib/log"
+
+	"github.com/fatedier/frp/pkg/util/log"
 )
 
 type LogPrefix struct {
