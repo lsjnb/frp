@@ -18,6 +18,8 @@ import (
 	"cmp"
 	"slices"
 
+	goliblog "github.com/fatedier/golib/log"
+
 	"github.com/fatedier/frp/pkg/util/log"
 )
 
@@ -35,11 +37,20 @@ type Logger struct {
 	prefixes []LogPrefix
 
 	prefixString string
+	logger       *goliblog.Logger
 }
 
 func New() *Logger {
 	return &Logger{
 		prefixes: make([]LogPrefix, 0),
+		logger:   log.Logger,
+	}
+}
+
+func NewWithLogger(logger *goliblog.Logger) *Logger {
+	return &Logger{
+		prefixes: make([]LogPrefix, 0),
+		logger:   logger,
 	}
 }
 
@@ -90,27 +101,45 @@ func (l *Logger) renderPrefixString() {
 
 func (l *Logger) Spawn() *Logger {
 	nl := New()
+	if l.logger != nil {
+		nl.logger = l.logger
+	}
 	nl.prefixes = append(nl.prefixes, l.prefixes...)
 	nl.renderPrefixString()
 	return nl
 }
 
 func (l *Logger) Errorf(format string, v ...any) {
-	log.Logger.Errorf(l.prefixString+format, v...)
+	if l.logger == nil {
+		l.logger = log.Logger
+	}
+	l.logger.Errorf(l.prefixString+format, v...)
 }
 
 func (l *Logger) Warnf(format string, v ...any) {
-	log.Logger.Warnf(l.prefixString+format, v...)
+	if l.logger == nil {
+		l.logger = log.Logger
+	}
+	l.logger.Warnf(l.prefixString+format, v...)
 }
 
 func (l *Logger) Infof(format string, v ...any) {
-	log.Logger.Infof(l.prefixString+format, v...)
+	if l.logger == nil {
+		l.logger = log.Logger
+	}
+	l.logger.Infof(l.prefixString+format, v...)
 }
 
 func (l *Logger) Debugf(format string, v ...any) {
-	log.Logger.Debugf(l.prefixString+format, v...)
+	if l.logger == nil {
+		l.logger = log.Logger
+	}
+	l.logger.Debugf(l.prefixString+format, v...)
 }
 
 func (l *Logger) Tracef(format string, v ...any) {
-	log.Logger.Tracef(l.prefixString+format, v...)
+	if l.logger == nil {
+		l.logger = log.Logger
+	}
+	l.logger.Tracef(l.prefixString+format, v...)
 }

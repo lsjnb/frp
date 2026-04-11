@@ -40,7 +40,14 @@ func init() {
 }
 
 func InitLogger(logPath string, levelStr string, maxDays int, disableLogColor bool) {
-	options := []log.Option{}
+	Logger = NewLogger(logPath, levelStr, maxDays, disableLogColor)
+}
+
+func NewLogger(logPath string, levelStr string, maxDays int, disableLogColor bool) *log.Logger {
+	options := []log.Option{
+		log.WithCaller(true),
+		log.AddCallerSkip(1),
+	}
 	if logPath == "console" {
 		if !disableLogColor {
 			options = append(options,
@@ -64,7 +71,7 @@ func InitLogger(logPath string, levelStr string, maxDays int, disableLogColor bo
 		level = log.InfoLevel
 	}
 	options = append(options, log.WithLevel(level))
-	Logger = Logger.WithOptions(options...)
+	return log.New(options...)
 }
 
 func Errorf(format string, v ...any) {

