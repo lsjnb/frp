@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/fatedier/golib/crypto"
+	goliblog "github.com/fatedier/golib/log"
 	"github.com/samber/lo"
 
 	"github.com/fatedier/frp/client/proxy"
@@ -76,6 +77,9 @@ type ServiceOptions struct {
 	// If it is empty, it means that the configuration file is not used for initialization.
 	// It may be initialized using command line parameters or called directly.
 	ConfigFilePath string
+
+	// Logger is the logger instance for this service. If nil, uses the global logger.
+	Logger *goliblog.Logger
 
 	// ClientSpec is the client specification that control the client behavior.
 	ClientSpec *msg.ClientSpec
@@ -145,6 +149,9 @@ type Service struct {
 	configSource *source.ConfigSource
 	storeSource  *source.StoreSource
 
+	// logger instance for this service
+	logger *goliblog.Logger
+
 	unsafeFeatures *security.UnsafeFeatures
 
 	// The configuration file used to initialize this client, or an empty
@@ -212,6 +219,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		storeSource:      storeSource,
 		connectorCreator: options.ConnectorCreator,
 		handleWorkConnCb: options.HandleWorkConnCb,
+		logger:           options.Logger,
 	}
 
 	if webServer != nil {
@@ -225,7 +233,11 @@ func NewService(options ServiceOptions) (*Service, error) {
 
 func (svr *Service) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancelCause(ctx)
-	svr.ctx = xlog.NewContext(ctx, xlog.FromContextSafe(ctx))
+	xl := xlog.FromContextSafe(ctx)
+	if svr.logger != nil {
+		xl = xlog.NewWithLogger(svr.logger)
+	}
+	svr.ctx = xlog.NewContext(ctx, xl)
 	svr.cancel = cancel
 
 	// set custom DNSServer
